@@ -139,93 +139,99 @@ fn app() -> Element {
     let (to_model_sender, to_model_receiver) = channel::<String>();
     let to_model_channel = use_signal(move || to_model_sender);
 
-    let mut user_input = use_signal(|| String::new());
+    let mut user_input = use_signal(String::new);
     let mut is_ctrl_pressed = use_signal(|| false);
     let mut is_waiting_for_response = use_signal_sync(|| false);
 
-    let mut conversation = use_signal_sync(|| Vec::<Message>::new());
+    let mut conversation = use_signal_sync(Vec::<Message>::new);
 
     use_hook(|| {
-        thread::spawn(move || loop {
-            let args = Args::parse();
-            let model_path: &str = args.model.as_str();
-            let tokenizer_path: &str = args.tokenizer.as_str();
-
-            assert!(
-                fs::metadata(tokenizer_path).is_ok(),
-                "Tokenizer file not found: {}",
-                tokenizer_path
-            );
-            assert!(
-                fs::metadata(model_path).is_ok(),
-                "Model file not found: {}",
-                model_path
-            );
-
-            let tokenizer = Tokenizer::new(args.tokenizer.as_str());
-
-            let file = File::open(model_path).expect("Error opening model file");
-            let data = unsafe { Mmap::map(&file).expect("MMap failed") };
-
-            let model = Transformer::new(&data);
-
-            let seed: u64 = match args.seed {
-                Some(seed_value) => seed_value,
-                None => {
-                    let start = SystemTime::now();
-                    let since_epoch = start
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Error getting time since epoch");
-
-                    since_epoch.as_millis() as u64
-                }
-            };
-
-            let sampler = Sampler::new(model.args.vocab_size, args.temperature, args.top_p, seed);
-
-            let mut context = Context {
-                user_idx: 0,
-                pos: 0,
-                token: 0,
-                next: 0,
-                num_prompt_tokens: 0,
-                total_tokens: 0.0,
-                total_duration: 0.0,
-                model,
-                prompt_tokens: Vec::new(),
-                tokenizer,
-                sampler,
-            };
-
+        thread::spawn(move || {
             loop {
-                let Ok(user_prompt) = to_model_receiver.recv() else {
-                    // The sender is droped when the app is closed
-                    break;
+                let args = Args::parse();
+                let model_path: &str = args.model.as_str();
+                let tokenizer_path: &str = args.tokenizer.as_str();
+
+                assert!(
+                    fs::metadata(tokenizer_path).is_ok(),
+                    "Tokenizer file not found: {}",
+                    tokenizer_path
+                );
+                assert!(
+                    fs::metadata(model_path).is_ok(),
+                    "Model file not found: {}",
+                    model_path
+                );
+
+                let tokenizer = Tokenizer::new(args.tokenizer.as_str());
+
+                let file = File::open(model_path).expect("Error opening model file");
+                let data = unsafe { Mmap::map(&file).expect("MMap failed") };
+
+                let (model, _) = Transformer::new(&data);
+
+                let seed: u64 = match args.seed {
+                    Some(seed_value) => seed_value,
+                    None => {
+                        let start = SystemTime::now();
+                        let since_epoch = start
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Error getting time since epoch");
+
+                        since_epoch.as_millis() as u64
+                    }
                 };
 
-                context.handle_user_prompt(&user_prompt);
+                let sampler =
+                    Sampler::new(model.args.vocab_size, args.temperature, args.top_p, seed);
 
-                conversation.write().push(Message::Bot(String::new()));
+                let mut context = Context {
+                    user_idx: 0,
+                    pos: 0,
+                    token: 0,
+                    next: 0,
+                    num_prompt_tokens: 0,
+                    total_tokens: 0.0,
+                    total_duration: 0.0,
+                    model,
+                    prompt_tokens: Vec::new(),
+                    tokenizer,
+                    sampler,
+                };
 
                 loop {
-                    let ModelResponse::Piece(resp_piece) = context.compute_model_response(true)
-                    else {
-                        is_waiting_for_response.set(false);
+                    let Ok(user_prompt) = to_model_receiver.recv() else {
+                        // The sender is droped when the app is closed
                         break;
                     };
-                    let mut conv = conversation.write();
-                    let Message::Bot(response) = conv.last_mut().expect("The bot response exists")
-                    else {
-                        panic!("The user cannot add messages to the conversation while the model is processing its response");
-                    };
-                    response.push_str(&resp_piece);
+
+                    context.handle_user_prompt(&user_prompt);
+
+                    conversation.write().push(Message::Bot(String::new()));
+
+                    loop {
+                        let ModelResponse::Piece(resp_piece) = context.compute_model_response(true)
+                        else {
+                            is_waiting_for_response.set(false);
+                            break;
+                        };
+                        let mut conv = conversation.write();
+                        let Message::Bot(response) =
+                            conv.last_mut().expect("The bot response exists")
+                        else {
+                            panic!(
+                                "The user cannot add messages to the conversation while the model is processing its response"
+                            );
+                        };
+                        response.push_str(&resp_piece);
+                    }
                 }
             }
         });
     });
 
     let mut handle_submit = {
-        let mut user_input = user_input.clone();
+        let mut user_input = user_input;
 
         move || {
             if is_waiting_for_response() {
