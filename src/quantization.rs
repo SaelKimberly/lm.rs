@@ -66,18 +66,15 @@ pub fn dequantize(qx: &QuantizedTensor, x: &mut [f32], n: usize, gs: u32, q_type
 
 pub fn quantize(qx: &mut MutableQuantizedTensor, x: &[f32], n: usize, gs: u32) {
     let num_groups: u32 = n as u32 / gs;
-    let q_max: f32 = 127.0f32;
+    const Q_MAX: f32 = 127.0f32;
 
     for group in 0..num_groups {
-        let mut wmax: f32 = 0.0;
-        for i in 0..gs {
-            let val: f32 = x[(group * gs + i) as usize].abs();
-            if val > wmax {
-                wmax = val;
-            }
-        }
+        let in_slice = unsafe {
+            std::slice::from_raw_parts(x.as_ptr().add((group * gs) as usize), gs as usize)
+        };
+        let wmax = crate::simd::absmax(in_slice);
 
-        let scale = wmax / q_max;
+        let scale = wmax / Q_MAX;
 
         qx.s[group as usize] = scale;
 
@@ -90,19 +87,16 @@ pub fn quantize(qx: &mut MutableQuantizedTensor, x: &[f32], n: usize, gs: u32) {
 }
 
 pub fn quantize_q4(qx: &mut MutableQuantizedTensor, x: &[f32], n: usize, gs: u32) {
+    const Q_MAX: f32 = -8.0f32;
     let num_groups: u32 = n as u32 / gs;
-    let q_max: f32 = -8.0f32;
 
     for group in 0..num_groups {
-        let mut wmax: f32 = 0.0;
-        for i in 0..gs {
-            let val: f32 = x[(group * gs + i) as usize].abs();
-            if val > wmax {
-                wmax = val;
-            }
-        }
+        let in_slice = unsafe {
+            std::slice::from_raw_parts(x.as_ptr().add((group * gs) as usize), gs as usize)
+        };
+        let wmax = crate::simd::absmax(in_slice);
 
-        let scale = wmax / q_max;
+        let scale = wmax / Q_MAX;
 
         qx.s[group as usize] = scale;
 
