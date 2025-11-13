@@ -1,18 +1,19 @@
 use crate::quantization::{MutableQuantizedTensor, QuantizedTensor};
 
 use rayon::prelude::*;
-use wide::{f32x8, i32x8};
+use wide::{f32x4;
+use zerocopy::FromZeros;
 
 // Some helper functions
-
+#[inline]
 pub fn slice_to_u32(slice: &[u8]) -> u32 {
     zerocopy::FromBytes::read_from_bytes(slice).expect("Slice must be exactly 4 bytes long")
 }
-
+#[inline]
 pub fn slice_to_f32(slice: &[u8]) -> f32 {
     zerocopy::FromBytes::read_from_bytes(slice).expect("Slice must be exactly 4 bytes long")
 }
-
+#[inline]
 pub fn u8_to_f32_slice(data: &[u8]) -> &[f32] {
     zerocopy::TryFromBytes::try_ref_from_bytes(data).expect("Data was not aligned correctly")
     // let (prefix, f32data, suffix) = unsafe { data.align_to::<f32>() };
@@ -20,11 +21,11 @@ pub fn u8_to_f32_slice(data: &[u8]) -> &[f32] {
     // assert!(suffix.is_empty(), "Data was not aligned correctly");
     // f32data
 }
-
+#[inline]
 pub fn u8_to_i8_slice(data: &[u8]) -> &[i8] {
     zerocopy::transmute_ref!(data)
 }
-
+#[inline]
 pub fn random_u32(mut state: u64) -> u32 {
     state ^= state >> 12;
     state ^= state << 25;
@@ -32,7 +33,7 @@ pub fn random_u32(mut state: u64) -> u32 {
 
     ((state * 0x2545F4914F6CDD1Du64) >> 32) as u32
 }
-
+#[inline]
 pub fn random_f32(state: u64) -> f32 {
     (random_u32(state) >> 8) as f32 / 16777216.0f32
 }
@@ -199,7 +200,9 @@ pub fn matmul_q8(
                     let ni2: usize = (new_i + 2) * n;
                     let ni3: usize = (new_i + 3) * n;
 
-                    xout_elem.iter_mut().for_each(|m| *m = 0.0);
+                    xout_elem.zero();
+
+                let mut().for_each(|m| *m = 0.0);
 
                     for j in (0..=(n - gs)).step_by(gs) {
                         let mut ival0 = i32x8::ZERO;
